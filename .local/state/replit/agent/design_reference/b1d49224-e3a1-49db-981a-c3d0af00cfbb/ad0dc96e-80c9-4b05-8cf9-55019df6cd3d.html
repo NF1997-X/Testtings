@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>FoodTracker - Expiration Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                borderRadius: {
+                    lg: "var(--radius)",
+                    md: "calc(var(--radius) - 2px)",
+                    sm: "calc(var(--radius) - 4px)",
+                },
+                colors: {
+                    background: "var(--background)",
+                    foreground: "var(--foreground)",
+                    card: {
+                        DEFAULT: "var(--card)",
+                        foreground: "var(--card-foreground)",
+                    },
+                    popover: {
+                        DEFAULT: "var(--popover)",
+                        foreground: "var(--popover-foreground)",
+                    },
+                    primary: {
+                        DEFAULT: "var(--primary)",
+                        foreground: "var(--primary-foreground)",
+                    },
+                    secondary: {
+                        DEFAULT: "var(--secondary)",
+                        foreground: "var(--secondary-foreground)",
+                    },
+                    muted: {
+                        DEFAULT: "var(--muted)",
+                        foreground: "var(--muted-foreground)",
+                    },
+                    accent: {
+                        DEFAULT: "var(--accent)",
+                        foreground: "var(--accent-foreground)",
+                    },
+                    destructive: {
+                        DEFAULT: "var(--destructive)",
+                        foreground: "var(--destructive-foreground)",
+                    },
+                    border: "var(--border)",
+                    input: "var(--input)",
+                    ring: "var(--ring)",
+                },
+                fontFamily: {
+                    sans: ["system-ui", "-apple-system", "BlinkMacSystemFont", "'Segoe UI'", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "'Open Sans'", "'Helvetica Neue'", "sans-serif"],
+                }
+            },
+        }
+    };
+    </script>
+    <style>
+        :root {
+            --background: hsl(240 10% 4%);
+            --foreground: hsl(0 0% 95%);
+            --card: hsl(240 6% 8%);
+            --card-foreground: hsl(0 0% 90%);
+            --popover: hsl(240 8% 6%);
+            --popover-foreground: hsl(0 0% 95%);
+            --primary: hsl(217 91% 60%);
+            --primary-foreground: hsl(0 0% 98%);
+            --secondary: hsl(240 4% 15%);
+            --secondary-foreground: hsl(0 0% 95%);
+            --muted: hsl(240 4% 12%);
+            --muted-foreground: hsl(240 5% 65%);
+            --accent: hsl(240 6% 10%);
+            --accent-foreground: hsl(0 0% 95%);
+            --destructive: hsl(0 84% 60%);
+            --destructive-foreground: hsl(0 0% 98%);
+            --border: hsl(240 6% 20%);
+            --input: hsl(240 6% 20%);
+            --ring: hsl(217 91% 60%);
+            --radius: 0.5rem;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .glass-dark {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .notification-dot {
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            width: 8px;
+            height: 8px;
+            background: #ef4444;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .swipe-actions {
+            transform: translateX(0);
+            transition: transform 0.3s ease;
+        }
+
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 2px;
+        }
+
+        .countdown-badge {
+            font-size: 0.75rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
+        .safe { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+        .warning { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .danger { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            background: linear-gradient(135deg, hsl(240 10% 4%) 0%, hsl(240 8% 6%) 100%);
+        }
+
+        .modal-backdrop {
+            backdrop-filter: blur(8px);
+            background: rgba(0, 0, 0, 0.6);
+        }
+    </style>
+</head>
+<body class="bg-background text-foreground min-h-screen">
+    <!-- @COMPONENT: NotificationSystem -->
+    <div id="notifications" class="fixed top-4 right-4 z-50 space-y-2"></div>
+    <!-- @END_COMPONENT: NotificationSystem -->
+
+    <div class="max-w-md mx-auto min-h-screen bg-background">
+        <!-- Header with Calendar -->
+        <!-- @COMPONENT: Header -->
+        <header class="glass-dark p-4 sticky top-0 z-40">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-utensils text-primary text-lg"></i>
+                    <h1 class="text-lg font-semibold">FoodTracker</h1>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button class="relative p-2 text-muted-foreground hover:text-foreground transition-colors">
+                        <i class="fas fa-bell text-sm"></i>
+                        <div class="notification-dot" data-mock="true"></div>
+                    </button>
+                    <button class="p-2 text-muted-foreground hover:text-foreground transition-colors" onclick="toggleSettings()">
+                        <i class="fas fa-cog text-sm"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Mini Calendar -->
+            <!-- @COMPONENT: MiniCalendar -->
+            <div class="glass rounded-lg p-3">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-sm font-medium" data-bind="currentMonth">December 2024</h3>
+                    <div class="flex space-x-1">
+                        <button class="p-1 hover:bg-white/10 rounded text-xs">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <button class="p-1 hover:bg-white/10 rounded text-xs">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="calendar-grid text-xs">
+                    <div class="text-center text-muted-foreground py-1">S</div>
+                    <div class="text-center text-muted-foreground py-1">M</div>
+                    <div class="text-center text-muted-foreground py-1">T</div>
+                    <div class="text-center text-muted-foreground py-1">W</div>
+                    <div class="text-center text-muted-foreground py-1">T</div>
+                    <div class="text-center text-muted-foreground py-1">F</div>
+                    <div class="text-center text-muted-foreground py-1">S</div>
+                    <!-- @MAP: calendar.days.map(day => ( -->
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">1</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">2</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">3</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">4</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">5</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">6</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">7</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">8</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">9</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">10</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">11</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">12</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">13</div>
+                    <div class="text-center py-1 bg-primary/20 text-primary rounded" data-mock="true">14</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer" data-mock="true">15</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer text-red-400" data-mock="true">16</div>
+                    <div class="text-center py-1 hover:bg-white/10 rounded cursor-pointer text-yellow-400" data-mock="true">17</div>
+                    <!-- @END_MAP )) -->
+                </div>
+            </div>
+            <!-- @END_COMPONENT: MiniCalendar -->
+        </header>
+        <!-- @END_COMPONENT: Header -->
+
+        <!-- Tab Navigation -->
+        <!-- @COMPONENT: TabNavigation -->
+        <nav class="px-4 mb-4">
+            <div class="glass rounded-lg p-1 flex">
+                <button class="flex-1 py-2 px-3 text-xs font-medium bg-primary/20 text-primary rounded transition-all" onclick="switchTab('active')">
+                    <i class="fas fa-list mr-1"></i>Active Items
+                </button>
+                <button class="flex-1 py-2 px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-all" onclick="switchTab('trash')">
+                    <i class="fas fa-trash mr-1"></i>Trash
+                </button>
+            </div>
+        </nav>
+        <!-- @END_COMPONENT: TabNavigation -->
+
+        <!-- Main Content Area -->
+        <main class="px-4 pb-20">
+            <!-- Active Items Tab -->
+            <!-- @COMPONENT: ActiveItemsTab -->
+            <div id="activeTab" class="space-y-3">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-sm font-medium text-muted-foreground">Food Items</h2>
+                    <span class="text-xs text-muted-foreground" data-bind="itemCount">12 items</span>
+                </div>
+
+                <!-- Food Item List -->
+                <!-- @MAP: foodItems.map(item => ( -->
+                <!-- Food Item 1 - Danger (3 days) -->
+                <div class="glass rounded-lg p-3 swipe-actions" data-mock="true">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center space-x-2 mb-1">
+                                <i class="fas fa-bread-slice text-sm text-muted-foreground"></i>
+                                <h3 class="text-sm font-medium" data-bind="item.name">Whole Wheat Bread</h3>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-muted-foreground" data-bind="item.expiryDate">Expires: Dec 17, 2024</span>
+                                <span class="countdown-badge danger" data-bind="item.daysRemaining">3 days</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-1 ml-3">
+                            <button class="p-1 hover:bg-white/10 rounded text-xs" onclick="editItem(1)">
+                                <i class="fas fa-edit text-muted-foreground"></i>
+                            </button>
+                            <button class="p-1 hover:bg-red-500/20 rounded text-xs" onclick="deleteItem(1)">
+                                <i class="fas fa-trash text-destructive"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Food Item 2 - Warning (15 days) -->
+                <div class="glass rounded-lg p-3 swipe-actions" data-mock="true">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center space-x-2 mb-1">
+                                <i class="fas fa-cheese text-sm text-muted-foreground"></i>
+                                <h3 class="text-sm font-medium" data-bind="item.name">Cheddar Cheese</h3>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-muted-foreground" data-bind="item.expiryDate">Expires: Dec 29, 2024</span>
+                                <span class="countdown-badge warning" data-bind="item.daysRemaining">15 days</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-1 ml-3">
+                            <button class="p-1 hover:bg-white/10 rounded text-xs" onclick="editItem(2)">
+                                <i class="fas fa-edit text-muted-foreground"></i>
+                            </button>
+                            <button class="p-1 hover:bg-red-500/20 rounded text-xs" onclick="deleteItem(2)">
+                                <i class="fas fa-trash text-destructive"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Food Item 3 - Safe (30+ days) -->
+                <div class="glass rounded-lg p-3 swipe-actions" data-mock="true">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center space-x-2 mb-1">
+                                <i class="fas fa-carrot text-sm text-muted-foreground"></i>
+                                <h3 class="text-sm font-medium" data-bind="item.name">Fresh Carrots</h3>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-muted-foreground" data-bind="item.expiryDate">Expires: Jan 20, 2025</span>
+                                <span class="countdown-badge safe" data-bind="item.daysRemaining">37 days</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-1 ml-3">
+                            <button class="p-1 hover:bg-white/10 rounded text-xs" onclick="editItem(3)">
+                                <i class="fas fa-edit text-muted-foreground"></i>
+                            </button>
+                            <button class="p-1 hover:bg-red-500/20 rounded text-xs" onclick="deleteItem(3)">
+                                <i class="fas fa-trash text-destructive"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- More items... -->
+                <div class="glass rounded-lg p-3 swipe-actions" data-mock="true">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center space-x-2 mb-1">
+                                <i class="fas fa-apple-alt text-sm text-muted-foreground"></i>
+                                <h3 class="text-sm font-medium" data-bind="item.name">Red Apples</h3>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-muted-foreground" data-bind="item.expiryDate">Expires: Dec 22, 2024</span>
+                                <span class="countdown-badge warning" data-bind="item.daysRemaining">8 days</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-1 ml-3">
+                            <button class="p-1 hover:bg-white/10 rounded text-xs" onclick="editItem(4)">
+                                <i class="fas fa-edit text-muted-foreground"></i>
+                            </button>
+                            <button class="p-1 hover:bg-red-500/20 rounded text-xs" onclick="deleteItem(4)">
+                                <i class="fas fa-trash text-destructive"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <!-- @END_MAP )) -->
+
+                <!-- Empty State -->
+                <div class="text-center py-8 hidden" id="emptyState" data-mock="true">
+                    <i class="fas fa-box-open text-2xl text-muted-foreground mb-2"></i>
+                    <p class="text-sm text-muted-foreground mb-4">No food items added yet</p>
+                    <button class="bg-primary text-primary-foreground px-4 py-2 rounded text-xs font-medium" onclick="openAddModal()">
+                        Add Your First Item
+                    </button>
+                </div>
+            </div>
+            <!-- @END_COMPONENT: ActiveItemsTab -->
+
+            <!-- Trash Tab -->
+            <!-- @COMPONENT: TrashTab -->
+            <div id="trashTab" class="space-y-3 hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-sm font-medium text-muted-foreground">Deleted Items</h2>
+                    <button class="text-xs text-destructive hover:text-red-300 transition-colors" onclick="clearTrash()">
+                        Clear All
+                    </button>
+                </div>
+
+                <!-- Deleted Item -->
+                <div class="glass rounded-lg p-3 opacity-70" data-mock="true">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center space-x-2 mb-1">
+                                <i class="fas fa-fish text-sm text-muted-foreground"></i>
+                                <h3 class="text-sm font-medium line-through" data-bind="item.name">Salmon Fillet</h3>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-muted-foreground" data-bind="item.deletedDate">Deleted: Dec 10, 2024</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-1 ml-3">
+                            <button class="p-1 hover:bg-green-500/20 rounded text-xs" onclick="restoreItem(1)">
+                                <i class="fas fa-undo text-green-400"></i>
+                            </button>
+                            <button class="p-1 hover:bg-red-500/20 rounded text-xs" onclick="permanentDelete(1)">
+                                <i class="fas fa-times text-destructive"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Empty Trash State -->
+                <div class="text-center py-8 hidden" id="emptyTrash" data-mock="true">
+                    <i class="fas fa-trash text-2xl text-muted-foreground mb-2"></i>
+                    <p class="text-sm text-muted-foreground">Trash is empty</p>
+                </div>
+            </div>
+            <!-- @END_COMPONENT: TrashTab -->
+        </main>
+
+        <!-- Floating Action Button -->
+        <!-- @COMPONENT: FloatingActionButton -->
+        <button class="fixed bottom-20 right-4 bg-primary hover:bg-primary/90 text-primary-foreground p-3 rounded-full shadow-lg transition-all duration-300 glass" onclick="openAddModal()">
+            <i class="fas fa-plus text-sm"></i>
+        </button>
+        <!-- @END_COMPONENT: FloatingActionButton -->
+
+        <!-- Bottom Navigation -->
+        <!-- @COMPONENT: BottomNavigation -->
+        <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto glass-dark p-2">
+            <div class="flex justify-around items-center">
+                <button class="flex flex-col items-center py-2 px-3 text-primary" onclick="switchView('home')">
+                    <i class="fas fa-home text-sm mb-1"></i>
+                    <span class="text-xs">Home</span>
+                </button>
+                <button class="flex flex-col items-center py-2 px-3 text-muted-foreground hover:text-foreground transition-colors" onclick="switchView('calendar')">
+                    <i class="fas fa-calendar-alt text-sm mb-1"></i>
+                    <span class="text-xs">Calendar</span>
+                </button>
+                <button class="flex flex-col items-center py-2 px-3 text-muted-foreground hover:text-foreground transition-colors" onclick="switchView('analytics')">
+                    <i class="fas fa-chart-line text-sm mb-1"></i>
+                    <span class="text-xs">Stats</span>
+                </button>
+                <button class="flex flex-col items-center py-2 px-3 text-muted-foreground hover:text-foreground transition-colors" onclick="switchView('profile')">
+                    <i class="fas fa-user text-sm mb-1"></i>
+                    <span class="text-xs">Profile</span>
+                </button>
+            </div>
+        </nav>
+        <!-- @END_COMPONENT: BottomNavigation -->
+    </div>
+
+    <!-- Add/Edit Item Modal -->
+    <!-- @COMPONENT: AddEditModal -->
+    <div id="addEditModal" class="fixed inset-0 modal-backdrop items-center justify-center z-50 hidden">
+        <div class="glass-dark rounded-lg p-6 m-4 w-full max-w-sm">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold" id="modalTitle">Add Food Item</h3>
+                <button onclick="closeModal()" class="text-muted-foreground hover:text-foreground">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <form id="itemForm" onsubmit="handleSubmit(event)">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Item Name</label>
+                        <input type="text" id="itemName" class="w-full bg-input border border-border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-ring focus:border-transparent" placeholder="Enter food item name" required>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Expiration Date</label>
+                        <input type="date" id="itemDate" class="w-full bg-input border border-border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-ring focus:border-transparent" required>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Category</label>
+                        <select id="itemCategory" class="w-full bg-input border border-border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-ring focus:border-transparent">
+                            <option value="dairy">🧀 Dairy</option>
+                            <option value="meat">🥩 Meat</option>
+                            <option value="vegetables">🥕 Vegetables</option>
+                            <option value="fruits">🍎 Fruits</option>
+                            <option value="bakery">🍞 Bakery</option>
+                            <option value="pantry">🥫 Pantry</option>
+                            <option value="frozen">❄️ Frozen</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Notes (Optional)</label>
+                        <textarea id="itemNotes" class="w-full bg-input border border-border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-ring focus:border-transparent resize-none" rows="2" placeholder="Add any notes..."></textarea>
+                    </div>
+                </div>
+
+                <div class="flex space-x-3 mt-6">
+                    <button type="button" onclick="closeModal()" class="flex-1 bg-secondary text-secondary-foreground py-2 px-4 rounded text-sm font-medium">
+                        Cancel
+                    </button>
+                    <button type="submit" class="flex-1 bg-primary text-primary-foreground py-2 px-4 rounded text-sm font-medium">
+                        Save Item
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <!-- @END_COMPONENT: AddEditModal -->
+
+    <!-- Settings Modal -->
+    <!-- @COMPONENT: SettingsModal -->
+    <div id="settingsModal" class="fixed inset-0 modal-backdrop items-center justify-center z-50 hidden">
+        <div class="glass-dark rounded-lg p-6 m-4 w-full max-w-sm">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold">Settings</h3>
+                <button onclick="closeSettings()" class="text-muted-foreground hover:text-foreground">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm">Push Notifications</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" class="sr-only peer" checked>
+                        <div class="w-9 h-5 bg-gray-700 peer-focus:ring-2 peer-focus:ring-ring rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                    </label>
+                </div>
+
+                <div class="flex items-center justify-between">
+                    <span class="text-sm">15-Day Warning</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" class="sr-only peer" checked>
+                        <div class="w-9 h-5 bg-gray-700 peer-focus:ring-2 peer-focus:ring-ring rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                    </label>
+                </div>
+
+                <div class="flex items-center justify-between">
+                    <span class="text-sm">3-Day Alert</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" class="sr-only peer" checked>
+                        <div class="w-9 h-5 bg-gray-700 peer-focus:ring-2 peer-focus:ring-ring rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                    </label>
+                </div>
+
+                <hr class="border-border">
+
+                <button class="w-full text-left text-sm py-2 hover:bg-white/5 rounded px-2 transition-colors">
+                    <i class="fas fa-download mr-2 text-muted-foreground"></i>
+                    Export Data
+                </button>
+
+                <button class="w-full text-left text-sm py-2 hover:bg-white/5 rounded px-2 transition-colors">
+                    <i class="fas fa-info-circle mr-2 text-muted-foreground"></i>
+                    About
+                </button>
+
+                <button class="w-full text-left text-sm py-2 text-destructive hover:bg-red-500/10 rounded px-2 transition-colors">
+                    <i class="fas fa-trash mr-2"></i>
+                    Clear All Data
+                </button>
+            </div>
+        </div>
+    </div>
+    <!-- @END_COMPONENT: SettingsModal -->
+
+    <script>
+        // TODO: Implement business logic, API calls, or state management
+        (() => {
+            // Modal management
+            window.openAddModal = () => {
+                document.getElementById('modalTitle').textContent = 'Add Food Item';
+                document.getElementById('addEditModal').classList.remove('hidden');
+                document.getElementById('addEditModal').classList.add('flex');
+            };
+
+            window.closeModal = () => {
+                document.getElementById('addEditModal').classList.add('hidden');
+                document.getElementById('addEditModal').classList.remove('flex');
+                document.getElementById('itemForm').reset();
+            };
+
+            window.toggleSettings = () => {
+                const modal = document.getElementById('settingsModal');
+                modal.classList.toggle('hidden');
+                modal.classList.toggle('flex');
+            };
+
+            window.closeSettings = () => {
+                document.getElementById('settingsModal').classList.add('hidden');
+                document.getElementById('settingsModal').classList.remove('flex');
+            };
+
+            // Tab switching
+            window.switchTab = (tab) => {
+                const activeTab = document.getElementById('activeTab');
+                const trashTab = document.getElementById('trashTab');
+                
+                if (tab === 'active') {
+                    activeTab.classList.remove('hidden');
+                    trashTab.classList.add('hidden');
+                } else {
+                    activeTab.classList.add('hidden');
+                    trashTab.classList.remove('hidden');
+                }
+            };
+
+            // Item management
+            window.editItem = (id) => {
+                document.getElementById('modalTitle').textContent = 'Edit Food Item';
+                // TODO: Load item data into form
+                document.getElementById('addEditModal').classList.remove('hidden');
+                document.getElementById('addEditModal').classList.add('flex');
+            };
+
+            window.deleteItem = (id) => {
+                if (confirm('Move this item to trash?')) {
+                    // TODO: Move item to trash
+                    showNotification('Item moved to trash', 'info');
+                }
+            };
+
+            window.restoreItem = (id) => {
+                // TODO: Restore item from trash
+                showNotification('Item restored', 'success');
+            };
+
+            window.permanentDelete = (id) => {
+                if (confirm('Permanently delete this item? This cannot be undone.')) {
+                    // TODO: Permanently delete item
+                    showNotification('Item permanently deleted', 'warning');
+                }
+            };
+
+            window.clearTrash = () => {
+                if (confirm('Clear all items from trash? This cannot be undone.')) {
+                    // TODO: Clear all trash items
+                    showNotification('Trash cleared', 'warning');
+                }
+            };
+
+            window.handleSubmit = (e) => {
+                e.preventDefault();
+                // TODO: Save item data
+                showNotification('Item saved successfully', 'success');
+                closeModal();
+            };
+
+            // Navigation
+            window.switchView = (view) => {
+                // TODO: Implement view switching
+                console.log('Switching to view:', view);
+            };
+
+            // Notifications
+            function showNotification(message, type = 'info') {
+                const notification = document.createElement('div');
+                notification.className = `glass rounded-lg p-3 text-sm flex items-center space-x-2 mb-2 ${
+                    type === 'success' ? 'text-green-400' : 
+                    type === 'warning' ? 'text-yellow-400' : 
+                    type === 'error' ? 'text-red-400' : 'text-blue-400'
+                }`;
+                
+                const icon = type === 'success' ? 'check-circle' : 
+                           type === 'warning' ? 'exclamation-triangle' : 
+                           type === 'error' ? 'times-circle' : 'info-circle';
+                
+                notification.innerHTML = `
+                    <i class="fas fa-${icon}"></i>
+                    <span>${message}</span>
+                    <button onclick="this.parentElement.remove()" class="ml-auto text-muted-foreground hover:text-foreground">
+                        <i class="fas fa-times text-xs"></i>
+                    </button>
+                `;
+                
+                document.getElementById('notifications').appendChild(notification);
+                
+                // Auto remove after 5 seconds
+                setTimeout(() => {
+                    if (notification.parentElement) {
+                        notification.remove();
+                    }
+                }, 5000);
+            }
+
+            // Initialize push notifications (placeholder)
+            if ('Notification' in window) {
+                if (Notification.permission === 'default') {
+                    Notification.requestPermission();
+                }
+            }
+
+            // Demo notification for expiring items
+            setTimeout(() => {
+                showNotification('⚠️ Whole Wheat Bread expires in 3 days!', 'warning');
+            }, 2000);
+        })();
+    </script>
+</body>
+</html>
